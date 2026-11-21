@@ -2,7 +2,7 @@ name: "Garbage Collector"
 
 # Deletes stale e2e resources. It only runs code from `main` and uses its own cloud identities, which can only list and delete
 # the services the garbage collector cleans (GCP Spanner instances; AWS aps, dynamodb, kinesis and sqs; Azure cosmos, event hubs
-# and resource deletion). They are not the Terraform identities. See .github/CI-SECURITY.md.
+# and resource deletion). They are not the Terraform identities.
 
 on:
   schedule:

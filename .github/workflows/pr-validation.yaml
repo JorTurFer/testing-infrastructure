@@ -11,7 +11,6 @@
 #   - `terraform init` uses the provider lock file from `main`, in read-only mode: a pull request cannot make this job
 #     download and run a different provider. Provider upgrades therefore fail here until they are merged by a maintainer.
 #   - `uses:` should be pinned by SHA before merging (versions are used here for readability; let Renovate pin them).
-#   See .github/CI-SECURITY.md.
 
 name: Validate PR
 

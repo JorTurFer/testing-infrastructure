@@ -34,7 +34,7 @@
       groupName: "Go Dependencies (non-major)",
     },
     // Terraform providers once a month: the PR changes the provider lock file, so the `Validate PR` terraform job
-    // (which uses the lock file from main) fails until a maintainer reviews and merges it (see .github/CI-SECURITY.md).
+    // (which uses the lock file from main) fails until a maintainer reviews and merges it.
     {
       matchManagers: ["terraform"],
       groupName: "Terraform providers and modules",

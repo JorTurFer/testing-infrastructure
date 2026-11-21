@@ -7,7 +7,7 @@
 #     without a manual approval, and its cloud identities only trust that environment and this workflow file.
 #   - `apply` computes the plan again and applies it. It does NOT pass a plan file between jobs: a plan file contains the values of
 #     sensitive attributes, and artifacts of a public repository can be downloaded by anyone with read access.
-#   - The apply identities are different from the plan ones and are not AdministratorAccess / Owner (see .github/CI-SECURITY.md).
+#   - The apply identities are different from the plan ones and are not AdministratorAccess / Owner.
 #   - No personal access token. The GitHub provider (which writes repository secrets) uses a token of a GitHub App. The plan job
 #     uses a read-only App; only `apply` can obtain a token with write permissions.
 #   - It never runs pull request code: the merge to `main` (reviewed by a maintainer) is the review of the Terraform that runs here.
