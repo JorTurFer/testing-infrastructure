@@ -41,6 +41,9 @@ jobs:
       contents: read
     env:
       ARM_USE_OIDC: "true"
+      # Authenticate to the state storage with Azure AD (Blob Data roles) instead of letting the backend list the storage
+      # account keys, which would give the (read-only) plan identity full write access to the state.
+      ARM_USE_AZUREAD: "true"
       ARM_CLIENT_ID: ${{ secrets.AZURE_PLAN_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
@@ -89,12 +92,10 @@ jobs:
         env:
           BACKEND_SA: ${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}
           BACKEND_CONTAINER: ${{ secrets.BACKEND_STORAGE_CONTAINER_NAME }}
-          BACKEND_RG: ${{ secrets.BACKEND_STORAGE_RESOURCE_GROUP_NAME }}
         run: |
           terraform init -input=false \
             -backend-config="storage_account_name=${BACKEND_SA}" \
-            -backend-config="container_name=${BACKEND_CONTAINER}" \
-            -backend-config="resource_group_name=${BACKEND_RG}"
+            -backend-config="container_name=${BACKEND_CONTAINER}"
         working-directory: terraform
 
       - name: Terraform plan (read-only, no state lock)
@@ -126,6 +127,9 @@ jobs:
       contents: read
     env:
       ARM_USE_OIDC: "true"
+      # Authenticate to the state storage with Azure AD (Blob Data roles) instead of letting the backend list the storage
+      # account keys, which would give the (read-only) plan identity full write access to the state.
+      ARM_USE_AZUREAD: "true"
       ARM_CLIENT_ID: ${{ secrets.AZURE_APPLY_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
@@ -175,12 +179,10 @@ jobs:
         env:
           BACKEND_SA: ${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}
           BACKEND_CONTAINER: ${{ secrets.BACKEND_STORAGE_CONTAINER_NAME }}
-          BACKEND_RG: ${{ secrets.BACKEND_STORAGE_RESOURCE_GROUP_NAME }}
         run: |
           terraform init -input=false \
             -backend-config="storage_account_name=${BACKEND_SA}" \
-            -backend-config="container_name=${BACKEND_CONTAINER}" \
-            -backend-config="resource_group_name=${BACKEND_RG}"
+            -backend-config="container_name=${BACKEND_CONTAINER}"
         working-directory: terraform
 
       - name: Terraform plan
