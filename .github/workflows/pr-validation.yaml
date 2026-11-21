@@ -1,151 +1,172 @@
-name: 'Validate PR'
+# BORRADOR de hardening (21/11/2026). Sustituye al workflow explotado. NO está subido a ningún repositorio.
+#
+# Diseño:
+#   1) `static`  -> INERTE: se ejecuta en cualquier PR (también forks), SIN secretos, SIN token OIDC, SIN permisos de escritura.
+#   2) `plan`    -> plan real con credenciales, solo para PRs de ramas del propio repo y SOLO tras la aprobación manual de un
+#                   mantenedor (environment `terraform-plan` con "Required reviewers"). Las credenciales viven como secretos
+#                   DEL ENVIRONMENT (no del repo), así que `static` o cualquier otro workflow no pueden leerlas.
+#
+# Reglas que cumple este fichero (no relajarlas):
+#   - Nada de `pull_request_target`, ni de `gh pr checkout`.
+#   - Ningún dato controlado por la PR se interpola dentro de `run:` ni de `script:`; se pasa por `env:` o por ficheros.
+#   - El script del pre-check se toma de `main` (carpeta `trusted/`), nunca del código de la PR.
+#   - Sin PAT, sin token de Grafana. El plan usa identidades de SOLO LECTURA (ver TRUST-POLICIES.md).
+#   - Los `uses:` deben fijarse por SHA antes de fusionar (aquí van por versión para legibilidad; que Renovate los fije).
+
+name: Validate PR
 
 on:
-  - pull_request_target
+  pull_request:
+    paths:
+      - "terraform/**"
+      - ".github/workflows/pr-validation.yaml"
+      - ".github/scripts/**"
 
-concurrency: terraform
+permissions: {}   # por defecto, nada; cada job pide lo mínimo
 
-permissions:
-  id-token: write
-  contents: read
-  pull-requests: read
+concurrency:
+  group: pr-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
-  terraform:
-    name: 'Terraform'
+  static:
+    name: Static checks (no credentials)
     runs-on: ubuntu-latest
-    env:
-      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      ARM_USE_OIDC: true      
-      GITHUB_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
-      GITHUB_OWNER: kedacore
-      GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
-
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
-    - name: Checkout
-      uses: actions/checkout@v7
+      - name: Checkout PR (untrusted code)
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-    - name: Checkout Pull Request
-      env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      id: checkout
-      run: |
-        gh pr checkout ${{ github.event.number }}
+      - name: Checkout trusted scripts from main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            terraform/.terraform.lock.hcl
 
-    - name: Log into Azure using OIDC
-      uses: azure/login@v3
-      with:
-        client-id: ${{ secrets.AZURE_CLIENT_ID }}
-        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Pre-check (blocks external data sources, provisioners, unknown providers/modules, backend and provider redirection)
+        run: python3 trusted/.github/scripts/terraform-precheck.py terraform --lock-base trusted/terraform/.terraform.lock.hcl
 
-    - name: Log into AWS using OIDC
-      uses: aws-actions/configure-aws-credentials@v6
-      with:
-        role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-        aws-region: eu-west-2
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_wrapper: false
 
-    - name: Log into GCP using OIDC
-      uses: google-github-actions/auth@v3
-      with:
-        workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-        service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v6
 
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v4.0.1
+      - name: Terraform fmt
+        run: terraform fmt -recursive -check
+        working-directory: terraform
 
-    - name: Setup TFLint
-      uses: terraform-linters/setup-tflint@v6
+      - name: Terraform init (no backend, no credentials)
+        run: terraform init -backend=false -input=false
+        working-directory: terraform
 
-    - name: Terraform Format
-      id: fmt
-      run: terraform fmt -recursive -check
-      continue-on-error: true
-      working-directory: terraform
+      - name: Terraform validate
+        run: terraform validate -no-color
+        working-directory: terraform
 
-    - name: Init TFLint
-      run: tflint --init
-      working-directory: terraform
+      - name: TFLint
+        run: |
+          tflint --init
+          tflint -f compact
+        working-directory: terraform
 
-    - name: Run TFLint
-      run: tflint -f compact
-      id: lint
-      continue-on-error: true
-      working-directory: terraform
+  plan:
+    name: Plan (requires maintainer approval)
+    needs: static
+    # Solo ramas del propio repositorio. Los forks nunca llegan aquí; si un mantenedor quiere un plan de una PR externa,
+    # revisa el diff y sube la rama al repo.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20   # el probe del atacante tardó 43 minutos
+    # APROBACIÓN MANUAL: este job no arranca hasta que un revisor del environment lo aprueba.
+    # Configurar el environment con: Required reviewers = equipo de mantenedores, "Prevent self-review", sin secretos a nivel de repo.
+    environment: terraform-plan
+    permissions:
+      id-token: write    # OIDC, solo disponible tras la aprobación
+      contents: read
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ secrets.AZURE_PLAN_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - name: Checkout the exact approved commit (untrusted code)
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
 
-    - name: Terraform Init
-      id: init
-      run: |
-        terraform init \
-        -backend-config=storage_account_name=${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME}} \
-        -backend-config=container_name=${{ secrets.BACKEND_STORAGE_CONTAINER_NAME}} \
-        -backend-config=resource_group_name=${{ secrets.BACKEND_STORAGE_RESOURCE_GROUP_NAME}} \
-        -backend-config=subscription_id="$ARM_SUBSCRIPTION_ID"
-      working-directory: terraform
+      - name: Checkout trusted scripts from main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            terraform/.terraform.lock.hcl
 
-    - name: Terraform Validate
-      id: validate
-      run: terraform validate -no-color
-      working-directory: terraform
+      - name: Pre-check again on the approved commit (the PR may have changed after the static job)
+        run: python3 trusted/.github/scripts/terraform-precheck.py terraform --lock-base trusted/terraform/.terraform.lock.hcl
 
-    - name: Terraform Plan
-      id: plan
-      run: terraform plan -no-color -input=false
-      continue-on-error: true
-      working-directory: terraform
+      - name: Log into Azure (plan identity, read-only)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_PLAN_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-    - name: Create the plan summary
-      uses: actions/github-script@v9
-      if: always()
-      id: summary
-      env:
-        PLAN: '${{ steps.plan.outputs.stdout }}'
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          // 1. Prep the output
-          const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
-          #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
-          #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
-          <details><summary>Validation Output</summary>
+      - name: Log into AWS (plan role, read-only)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_TO_ASSUME }}
+          aws-region: eu-west-2
 
-          \`\`\`\n
-          ${{ steps.validate.outputs.stdout }}
-          \`\`\`
+      - name: Log into GCP (plan service account, read-only)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_PLAN_SERVICE_ACCOUNT }}
 
-          </details>
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_wrapper: false
 
-          #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
-          
-          <details><summary>Show Plan</summary>
-          
-          \`\`\`\n
-          ${process.env.PLAN}
-          \`\`\`
-          
-          </details>
-          
-          *Pusher: @${{ github.actor }}*`;
-          
-          // 2. Set the output variable
-          const fs = require('fs');
-          fs.writeFileSync('summary.md', output);
-          core.setOutput('summary', output);
+      - name: Terraform init
+        env:
+          BACKEND_SA: ${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}
+          BACKEND_CONTAINER: ${{ secrets.BACKEND_STORAGE_CONTAINER_NAME }}
+          BACKEND_RG: ${{ secrets.BACKEND_STORAGE_RESOURCE_GROUP_NAME }}
+        run: |
+          terraform init -input=false \
+            -backend-config="storage_account_name=${BACKEND_SA}" \
+            -backend-config="container_name=${BACKEND_CONTAINER}" \
+            -backend-config="resource_group_name=${BACKEND_RG}" \
+            -backend-config="subscription_id=${ARM_SUBSCRIPTION_ID}"
+        working-directory: terraform
 
-    - name: Write the step summary
-      if: always()
-      run: cat summary.md >> $GITHUB_STEP_SUMMARY
+      - name: Terraform plan (read-only, no state lock)
+        run: terraform plan -no-color -input=false -lock=false 2>&1 | tee ../plan.txt
+        working-directory: terraform
 
-    - name: Terraform Format Status
-      if: steps.fmt.outcome == 'failure'
-      run: exit 1
-
-    - name: Terraform Lint Status
-      if: steps.lint.outcome == 'failure'
-      run: exit 1
-
-    - name: Terraform Plan Status
-      if: steps.plan.outcome == 'failure'
-      run: exit 1
+      - name: Publish the plan in the run summary (as text, never as code)
+        if: always()
+        run: |
+          {
+            echo '### Terraform plan'
+            echo 'Commit: `'"${GITHUB_SHA}"'` approved manually'
+            echo '```'
+            sed 's/```/` ` `/g' plan.txt | head -c 60000
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
