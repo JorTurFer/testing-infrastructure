@@ -20,6 +20,7 @@ on:
       - main
     paths:
       - "terraform/**"
+      - "tools/terraform-precheck/**"
       - ".github/workflows/main.yaml"
   schedule:
     - cron: "0 7 * * 1"   # Mondays 07:00 UTC: AKS update
@@ -51,8 +52,17 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Setup Go (for the pre-check)
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: tools/terraform-precheck/go.mod
+          cache: false
+
       - name: Pre-check
-        run: python3 .github/scripts/terraform-precheck.py terraform
+        env:
+          GOFLAGS: -mod=readonly
+        run: go run . "$GITHUB_WORKSPACE/terraform"
+        working-directory: tools/terraform-precheck
 
       - name: Create a read-only GitHub App token for the github provider
         id: app-token
@@ -139,8 +149,17 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Setup Go (for the pre-check)
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: tools/terraform-precheck/go.mod
+          cache: false
+
       - name: Pre-check
-        run: python3 .github/scripts/terraform-precheck.py terraform
+        env:
+          GOFLAGS: -mod=readonly
+        run: go run . "$GITHUB_WORKSPACE/terraform"
+        working-directory: tools/terraform-precheck
 
       - name: Create a GitHub App token for the github provider (writes repository secrets)
         id: app-token

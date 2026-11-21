@@ -16,6 +16,14 @@ updates:
   labels:
   - enhancement
   - dependency-management
+- package-ecosystem: gomod
+  directory: "/tools/terraform-precheck"
+  schedule:
+    interval: weekly
+  open-pull-requests-limit: 10
+  labels:
+  - enhancement
+  - dependency-management
 - package-ecosystem: docker
   directory: "/"
   schedule:

@@ -13,7 +13,7 @@
 # Rules this file follows (do not relax them):
 #   - No `pull_request_target` and no `gh pr checkout`.
 #   - No data controlled by the pull request is interpolated inside `run:` or `script:`; it is passed through `env:` or files.
-#   - The pre-check script is taken from `main` (the `trusted/` folder), never from the pull request code.
+#   - The pre-check program is taken from `main` (the `trusted/` folder), never from the pull request code.
 #   - No personal access token. The plan uses READ-ONLY identities, including a read-only GitHub App.
 #   - `uses:` should be pinned by SHA before merging (versions are used here for readability; let Renovate pin them).
 #   See .github/CI-SECURITY.md for the identities and settings this workflow needs.
@@ -25,7 +25,7 @@ on:
     paths:
       - "terraform/**"
       - ".github/workflows/pr-validation.yaml"
-      - ".github/scripts/**"
+      - "tools/terraform-precheck/**"
 
 permissions: {}   # nothing by default; each job asks for the minimum
 
@@ -52,12 +52,22 @@ jobs:
           ref: main
           path: trusted
           persist-credentials: false
+          sparse-checkout-cone-mode: false   # the list contains a single file
           sparse-checkout: |
-            .github/scripts
+            tools/terraform-precheck
             terraform/.terraform.lock.hcl
 
+      - name: Setup Go (for the pre-check, built from main)
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: trusted/tools/terraform-precheck/go.mod
+          cache: false
+
       - name: Pre-check (blocks external data sources, file-reading functions, provisioners, unknown providers/modules, backend and provider redirection)
-        run: python3 trusted/.github/scripts/terraform-precheck.py terraform --lock-base trusted/terraform/.terraform.lock.hcl
+        env:
+          GOFLAGS: -mod=readonly
+        run: go run . "$GITHUB_WORKSPACE/terraform" --lock-base "$GITHUB_WORKSPACE/trusted/terraform/.terraform.lock.hcl"
+        working-directory: trusted/tools/terraform-precheck
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4.0.1
@@ -115,12 +125,22 @@ jobs:
           ref: main
           path: trusted
           persist-credentials: false
+          sparse-checkout-cone-mode: false   # the list contains a single file
           sparse-checkout: |
-            .github/scripts
+            tools/terraform-precheck
             terraform/.terraform.lock.hcl
 
+      - name: Setup Go (for the pre-check, built from main)
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: trusted/tools/terraform-precheck/go.mod
+          cache: false
+
       - name: Pre-check again on the exact commit
-        run: python3 trusted/.github/scripts/terraform-precheck.py terraform --lock-base trusted/terraform/.terraform.lock.hcl
+        env:
+          GOFLAGS: -mod=readonly
+        run: go run . "$GITHUB_WORKSPACE/terraform" --lock-base "$GITHUB_WORKSPACE/trusted/terraform/.terraform.lock.hcl"
+        working-directory: trusted/tools/terraform-precheck
 
       - name: Create a read-only GitHub App token for the github provider
         id: app-token
