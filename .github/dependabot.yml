@@ -16,8 +16,8 @@ updates:
   labels:
   - enhancement
   - dependency-management
-- package-ecosystem: gomod
-  directory: "/tools/terraform-precheck"
+- package-ecosystem: terraform
+  directory: "/terraform"
   schedule:
     interval: weekly
   open-pull-requests-limit: 10

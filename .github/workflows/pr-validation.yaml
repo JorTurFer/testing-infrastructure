@@ -1,22 +1,17 @@
-# Validate a Terraform pull request without ever giving untrusted code access to powerful cloud credentials.
+# Validate a pull request WITHOUT any cloud credentials.
 #
-# Design:
-#   1) `static` -> INERT: runs on any pull request (forks included) with NO secrets, NO OIDC token and NO write permissions.
-#   2) `plan`   -> real plan, only for pull requests from branches of this repository (never forks, never Dependabot).
-#                  It runs automatically, without a manual approval, with READ-ONLY identities and after the pre-check.
-#                  The `terraform-plan` environment has no required reviewers: it only scopes the secrets and the OIDC subject,
-#                  so no other workflow can read them. Forks only get `static`; a maintainer who wants a real plan for an
-#                  external contribution reviews the diff and pushes the branch to this repository.
-#   The only human gate that protects write access is the approval of the `terraform-apply` environment (see main.yaml),
-#   which happens after the plan is visible.
+# Every job here runs with the `pull_request` trigger, `contents: read` only, no secrets, no OIDC token and no write
+# permissions, so it is safe to run on any pull request (forks included). There is deliberately no `terraform plan`
+# against the real infrastructure: a plan needs read access to the state, and the state contains secrets. The real plan
+# runs after the merge (see main.yaml) and nothing is applied without the approval of the `terraform-apply` environment.
 #
 # Rules this file follows (do not relax them):
-#   - No `pull_request_target` and no `gh pr checkout`.
+#   - No `pull_request_target`, no `gh pr checkout`, no secrets, no `id-token` permission, no environments.
 #   - No data controlled by the pull request is interpolated inside `run:` or `script:`; it is passed through `env:` or files.
-#   - The pre-check program is taken from `main` (the `trusted/` folder), never from the pull request code.
-#   - No personal access token. The plan uses READ-ONLY identities, including a read-only GitHub App.
-#   - `uses:` should be pinned by SHA before merging (versions are used here for readability; let Renovate pin them).
-#   See .github/CI-SECURITY.md for the identities and settings this workflow needs.
+#   - `terraform init` uses the provider lock file from `main`, in read-only mode: a pull request cannot make this job
+#     download and run a different provider. Provider upgrades therefore fail here until they are merged by a maintainer.
+#   - `uses:` should be pinned by SHA before merging (versions are used here for readability; let Renovate/Dependabot pin them).
+#   See .github/CI-SECURITY.md.
 
 name: Validate PR
 
@@ -24,8 +19,9 @@ on:
   pull_request:
     paths:
       - "terraform/**"
-      - ".github/workflows/pr-validation.yaml"
-      - "tools/terraform-precheck/**"
+      - "garbage-collector/**"
+      - ".github/workflows/**"
+      - ".github/dependabot.yml"
 
 permissions: {}   # nothing by default; each job asks for the minimum
 
@@ -34,174 +30,147 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  static:
-    name: Static checks (no credentials)
+  terraform:
+    name: Terraform (fmt, validate, tflint)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
-      - name: Checkout PR (untrusted code)
+      - name: Checkout PR
         uses: actions/checkout@v7
         with:
           persist-credentials: false
 
-      - name: Checkout trusted scripts from main
+      - name: Checkout the provider lock file from main
         uses: actions/checkout@v7
         with:
           ref: main
           path: trusted
           persist-credentials: false
-          sparse-checkout-cone-mode: false   # the list contains a single file
+          sparse-checkout-cone-mode: false   # the list is a single file
           sparse-checkout: |
-            tools/terraform-precheck
             terraform/.terraform.lock.hcl
 
-      - name: Setup Go (for the pre-check, built from main)
-        uses: actions/setup-go@v7
-        with:
-          go-version-file: trusted/tools/terraform-precheck/go.mod
-          cache: false
-
-      - name: Pre-check (blocks external data sources, file-reading functions, provisioners, unknown providers/modules, backend and provider redirection)
-        env:
-          GOFLAGS: -mod=readonly
-        run: go run . "$GITHUB_WORKSPACE/terraform" --lock-base "$GITHUB_WORKSPACE/trusted/terraform/.terraform.lock.hcl"
-        working-directory: trusted/tools/terraform-precheck
+      - name: Report changes to the provider lock file
+        run: |
+          if ! diff -q trusted/terraform/.terraform.lock.hcl terraform/.terraform.lock.hcl >/dev/null; then
+            echo "::warning file=terraform/.terraform.lock.hcl::The lock file differs from main. This job uses the one from main, so a provider change fails here until a maintainer reviews and merges it."
+          fi
+          cp trusted/terraform/.terraform.lock.hcl terraform/.terraform.lock.hcl
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4.0.1
         with:
           terraform_wrapper: false
 
-      - name: Setup TFLint
-        uses: terraform-linters/setup-tflint@v6
-
       - name: Terraform fmt
-        run: terraform fmt -recursive -check
+        run: terraform fmt -recursive -check -diff
         working-directory: terraform
 
-      - name: Terraform init (no backend, no credentials)
-        run: terraform init -backend=false -input=false
+      - name: Terraform init (no backend, no credentials, lock file from main)
+        run: terraform init -backend=false -input=false -lockfile=readonly
         working-directory: terraform
 
       - name: Terraform validate
         run: terraform validate -no-color
         working-directory: terraform
 
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v6
+
       - name: TFLint
+        env:
+          GITHUB_TOKEN: ${{ github.token }}   # read-only; only used by `tflint --init` to download the pinned plugins
         run: |
           tflint --init
-          tflint -f compact
+          tflint --recursive --format compact
         working-directory: terraform
 
-  plan:
-    name: Plan (read-only identities)
-    needs: static
-    # Only branches of this repository. Forks never reach this job, and Dependabot runs do not get these secrets anyway.
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+  security-scan:
+    name: Terraform security scan (Trivy)
     runs-on: ubuntu-latest
-    timeout-minutes: 20   # a plan should never take this long: fail instead of hanging
-    environment: terraform-plan   # no required reviewers; it only scopes secrets and the OIDC subject
+    timeout-minutes: 10
     permissions:
-      id-token: write
       contents: read
-    env:
-      ARM_USE_OIDC: "true"
-      ARM_CLIENT_ID: ${{ secrets.AZURE_PLAN_CLIENT_ID }}
-      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      GITHUB_OWNER: kedacore
     steps:
-      - name: Checkout the exact commit of the pull request (untrusted code)
+      - name: Checkout PR
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
 
-      - name: Checkout trusted scripts from main
+      # Report-only for now: the existing code has findings nobody has triaged. Set `exit-code: "1"` once they are
+      # fixed or ignored (.trivyignore) so that new misconfigurations fail the check.
+      - name: Scan the Terraform for misconfigurations
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: terraform
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          format: table
+
+  workflows:
+    name: GitHub Actions workflows (actionlint, zizmor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout PR
         uses: actions/checkout@v7
         with:
-          ref: main
-          path: trusted
           persist-credentials: false
-          sparse-checkout-cone-mode: false   # the list contains a single file
-          sparse-checkout: |
-            tools/terraform-precheck
-            terraform/.terraform.lock.hcl
 
-      - name: Setup Go (for the pre-check, built from main)
+      - name: actionlint
+        uses: docker://rhysd/actionlint:1.7.12
+
+      # Static analysis of the workflows themselves: dangerous triggers, template injection, unpinned actions,
+      # excessive permissions, credential persistence...
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@v0.8.1
+        with:
+          advanced-security: false   # print the findings; uploading SARIF would need `security-events: write`
+
+  go:
+    name: Garbage collector (vet, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: trusted/tools/terraform-precheck/go.mod
+          go-version-file: garbage-collector/go.mod
           cache: false
 
-      - name: Pre-check again on the exact commit
-        env:
-          GOFLAGS: -mod=readonly
-        run: go run . "$GITHUB_WORKSPACE/terraform" --lock-base "$GITHUB_WORKSPACE/trusted/terraform/.terraform.lock.hcl"
-        working-directory: trusted/tools/terraform-precheck
+      - name: go vet
+        run: go vet ./...
+        working-directory: garbage-collector
 
-      - name: Create a read-only GitHub App token for the github provider
-        id: app-token
-        uses: actions/create-github-app-token@v3
+      - name: go test
+        run: go test ./...
+        working-directory: garbage-collector
+
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
         with:
-          app-id: ${{ vars.TF_PLAN_APP_ID }}
-          private-key: ${{ secrets.TF_PLAN_APP_PRIVATE_KEY }}
-          owner: kedacore
-          permission-metadata: read
-          permission-secrets: read
+          persist-credentials: false
 
-      - name: Log into Azure (plan identity, read-only)
-        uses: azure/login@v3
+      - name: Review new or changed dependencies (known vulnerabilities, licenses)
+        uses: actions/dependency-review-action@v5
         with:
-          client-id: ${{ secrets.AZURE_PLAN_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Log into AWS (plan role, read-only)
-        uses: aws-actions/configure-aws-credentials@v6
-        with:
-          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_TO_ASSUME }}
-          aws-region: eu-west-2
-
-      - name: Log into GCP (plan service account, read-only)
-        uses: google-github-actions/auth@v3
-        with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_PLAN_SERVICE_ACCOUNT }}
-
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4.0.1
-        with:
-          terraform_wrapper: false
-
-      - name: Terraform init
-        env:
-          BACKEND_SA: ${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}
-          BACKEND_CONTAINER: ${{ secrets.BACKEND_STORAGE_CONTAINER_NAME }}
-          BACKEND_RG: ${{ secrets.BACKEND_STORAGE_RESOURCE_GROUP_NAME }}
-        run: |
-          terraform init -input=false \
-            -backend-config="storage_account_name=${BACKEND_SA}" \
-            -backend-config="container_name=${BACKEND_CONTAINER}" \
-            -backend-config="resource_group_name=${BACKEND_RG}" \
-            -backend-config="subscription_id=${ARM_SUBSCRIPTION_ID}"
-        working-directory: terraform
-
-      - name: Terraform plan (read-only, no state lock)
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: terraform plan -no-color -input=false -lock=false 2>&1 | tee ../plan.txt
-        working-directory: terraform
-
-      - name: Publish the plan in the run summary (as text, never as code)
-        if: always()
-        run: |
-          {
-            echo '### Terraform plan'
-            echo 'Commit: `'"${GITHUB_SHA}"'`'
-            echo '```'
-            sed 's/```/` ` `/g' plan.txt | head -c 60000
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
+          fail-on-severity: high
