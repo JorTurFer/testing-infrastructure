@@ -1,17 +1,22 @@
-# Validate a Terraform pull request without ever giving untrusted code access to cloud credentials.
+# Validate a Terraform pull request without ever giving untrusted code access to powerful cloud credentials.
 #
 # Design:
 #   1) `static` -> INERT: runs on any pull request (forks included) with NO secrets, NO OIDC token and NO write permissions.
-#   2) `plan`   -> real plan with credentials, only for pull requests from branches of this repository and ONLY after a
-#                  maintainer approves the `terraform-plan` environment (required reviewers). The cloud identifiers live as
-#                  secrets OF THE ENVIRONMENT (not of the repository), so `static` or any other workflow cannot read them.
+#   2) `plan`   -> real plan, only for pull requests from branches of this repository (never forks, never Dependabot).
+#                  It runs automatically, without a manual approval, with READ-ONLY identities and after the pre-check.
+#                  The `terraform-plan` environment has no required reviewers: it only scopes the secrets and the OIDC subject,
+#                  so no other workflow can read them. Forks only get `static`; a maintainer who wants a real plan for an
+#                  external contribution reviews the diff and pushes the branch to this repository.
+#   The only human gate that protects write access is the approval of the `terraform-apply` environment (see main.yaml),
+#   which happens after the plan is visible.
 #
 # Rules this file follows (do not relax them):
 #   - No `pull_request_target` and no `gh pr checkout`.
 #   - No data controlled by the pull request is interpolated inside `run:` or `script:`; it is passed through `env:` or files.
 #   - The pre-check script is taken from `main` (the `trusted/` folder), never from the pull request code.
-#   - No personal access token and no Grafana token. The plan uses READ-ONLY identities (see .github/CI-SECURITY.md).
+#   - No personal access token and no Grafana token. The plan uses READ-ONLY identities, including a read-only GitHub App.
 #   - `uses:` should be pinned by SHA before merging (versions are used here for readability; let Renovate pin them).
+#   See .github/CI-SECURITY.md for the identities and settings this workflow needs.
 
 name: Validate PR
 
@@ -51,7 +56,7 @@ jobs:
             .github/scripts
             terraform/.terraform.lock.hcl
 
-      - name: Pre-check (blocks external data sources, provisioners, unknown providers/modules, backend and provider redirection)
+      - name: Pre-check (blocks external data sources, file-reading functions, provisioners, unknown providers/modules, backend and provider redirection)
         run: python3 trusted/.github/scripts/terraform-precheck.py terraform --lock-base trusted/terraform/.terraform.lock.hcl
 
       - name: Setup Terraform
@@ -81,26 +86,24 @@ jobs:
         working-directory: terraform
 
   plan:
-    name: Plan (requires maintainer approval)
+    name: Plan (read-only identities)
     needs: static
-    # Only branches of this repository. Forks never reach this job; if a maintainer wants a plan for an external pull request,
-    # they review the diff and push the branch to this repository.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Only branches of this repository. Forks never reach this job, and Dependabot runs do not get these secrets anyway.
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 20   # a plan should never take this long: fail instead of hanging
-    # MANUAL APPROVAL: this job does not start until a reviewer of the environment approves it.
-    # Configure the environment with: required reviewers = maintainers team, "Prevent self-review", no repository-level secrets.
-    environment: terraform-plan
+    environment: terraform-plan   # no required reviewers; it only scopes secrets and the OIDC subject
     permissions:
-      id-token: write    # OIDC, only available after the approval
+      id-token: write
       contents: read
     env:
       ARM_USE_OIDC: "true"
       ARM_CLIENT_ID: ${{ secrets.AZURE_PLAN_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      GITHUB_OWNER: kedacore
     steps:
-      - name: Checkout the exact approved commit (untrusted code)
+      - name: Checkout the exact commit of the pull request (untrusted code)
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
@@ -116,8 +119,18 @@ jobs:
             .github/scripts
             terraform/.terraform.lock.hcl
 
-      - name: Pre-check again on the approved commit (the PR may have changed after the static job)
+      - name: Pre-check again on the exact commit
         run: python3 trusted/.github/scripts/terraform-precheck.py terraform --lock-base trusted/terraform/.terraform.lock.hcl
+
+      - name: Create a read-only GitHub App token for the github provider
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.TF_PLAN_APP_ID }}
+          private-key: ${{ secrets.TF_PLAN_APP_PRIVATE_KEY }}
+          owner: kedacore
+          permission-metadata: read
+          permission-secrets: read
 
       - name: Log into Azure (plan identity, read-only)
         uses: azure/login@v3
@@ -157,6 +170,8 @@ jobs:
         working-directory: terraform
 
       - name: Terraform plan (read-only, no state lock)
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: terraform plan -no-color -input=false -lock=false 2>&1 | tee ../plan.txt
         working-directory: terraform
 
@@ -165,7 +180,7 @@ jobs:
         run: |
           {
             echo '### Terraform plan'
-            echo 'Commit: `'"${GITHUB_SHA}"'` approved manually'
+            echo 'Commit: `'"${GITHUB_SHA}"'`'
             echo '```'
             sed 's/```/` ` `/g' plan.txt | head -c 60000
             echo '```'
