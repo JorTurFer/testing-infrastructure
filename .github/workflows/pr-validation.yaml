@@ -14,7 +14,7 @@
 #   - No `pull_request_target` and no `gh pr checkout`.
 #   - No data controlled by the pull request is interpolated inside `run:` or `script:`; it is passed through `env:` or files.
 #   - The pre-check script is taken from `main` (the `trusted/` folder), never from the pull request code.
-#   - No personal access token and no Grafana token. The plan uses READ-ONLY identities, including a read-only GitHub App.
+#   - No personal access token. The plan uses READ-ONLY identities, including a read-only GitHub App.
 #   - `uses:` should be pinned by SHA before merging (versions are used here for readability; let Renovate pin them).
 #   See .github/CI-SECURITY.md for the identities and settings this workflow needs.
 

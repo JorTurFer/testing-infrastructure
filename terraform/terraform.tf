@@ -38,10 +38,6 @@ terraform {
       source  = "betr-io/mssql"
       version = "0.3.1"
     }
-    grafana = {
-      source  = "grafana/grafana"
-      version = "3.17.1"
-    }
   }
 }
 

@@ -26,10 +26,10 @@ import json, os, re, sys
 
 ALLOWED_PROVIDER_SOURCES = {
     "hashicorp/aws", "hashicorp/azuread", "hashicorp/azurerm", "hashicorp/google", "hashicorp/random",
-    "hashicorp/tls", "alekc/kubectl", "betr-io/mssql", "grafana/grafana", "integrations/github",
+    "hashicorp/tls", "alekc/kubectl", "betr-io/mssql", "integrations/github",
 }
 # Resource/data type prefixes that map to the allowed providers.
-ALLOWED_TYPE_PREFIXES = {"aws", "azurerm", "azuread", "google", "random", "tls", "kubectl", "mssql", "grafana", "github"}
+ALLOWED_TYPE_PREFIXES = {"aws", "azurerm", "azuread", "google", "random", "tls", "kubectl", "mssql", "github"}
 BUILTIN_TYPES = {"terraform_data"}  # built in; provisioners are checked separately
 # Attributes allowed in `provider` blocks (taken from the code in main on 2026-11-21). Anything else is rejected.
 ALLOWED_PROVIDER_ATTRS = {
@@ -89,7 +89,7 @@ def check_hcl(path, rel, text):
             bad(rel, f"module with a non-local source: {src}")
         elif not os.path.realpath(norm).startswith(os.path.realpath(ROOT) + os.sep):
             bad(rel, f"module outside the repository: {src}")
-    # `provider` blocks: strict allowlist of names and attributes. aws, google, azuread, github and grafana are
+    # `provider` blocks: strict allowlist of names and attributes. aws, google, azuread and github are
     # configured through environment variables; an `endpoints` block, `*_custom_endpoint`, a proxy, `metadata_host`...
     # would redirect the job credentials to a server controlled by someone else.
     for hdr, body in blocks(t, "provider"):

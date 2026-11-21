@@ -10,7 +10,6 @@
 #   - The apply identities are different from the plan ones and are not AdministratorAccess / Owner (see .github/CI-SECURITY.md).
 #   - No personal access token. The GitHub provider (which writes repository secrets) uses a token of a GitHub App. The plan job
 #     uses a read-only App; only `apply` can obtain a token with write permissions.
-#   - No Grafana token (remove the grafana module and provider from the Terraform if the account is no longer used).
 #   - The same pre-check runs here as defense in depth, taken from `main` itself.
 
 name: Deploy infrastructure
@@ -150,7 +149,7 @@ jobs:
           app-id: ${{ vars.TF_APP_ID }}
           private-key: ${{ secrets.TF_APP_PRIVATE_KEY }}
           owner: kedacore
-          repositories: keda,keda-performance,testing-infrastructure   # only the ones Terraform writes to
+          repositories: keda,testing-infrastructure   # only the ones Terraform writes to
           permission-metadata: read
           permission-secrets: write
 
