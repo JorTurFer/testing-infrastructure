@@ -1,73 +1,110 @@
-name: "Deploy infrastucture"
+# Deploy the infrastructure.
+#
+# Rules this file follows (do not relax them):
+#   - It only runs code from `main` (the job refuses to run on any other branch).
+#   - `environment: terraform-apply` has required reviewers and deployments restricted to `main`: the apply never starts
+#     without a manual approval.
+#   - The apply identities are different from the plan ones and are not AdministratorAccess / Owner (see .github/CI-SECURITY.md).
+#   - No personal access token. The GitHub provider (which writes repository secrets) uses a token of a GitHub App with
+#     minimal permissions.
+#   - No Grafana token (remove the grafana module and provider from the Terraform if the account is no longer used).
+#   - The same pre-check runs here as defense in depth, taken from `main` itself.
+
+name: Deploy infrastructure
 
 on:
   push:
     branches:
       - main
     paths:
-      - "**.tf"
-      - ".github/workflows/terraform.yaml"
-  schedule: # Scheduling the job we will update AKS automatically
-    - cron: "0 7 * * 1" # Mondays at 7:00 AM
+      - "terraform/**"
+      - ".github/workflows/main.yaml"
+  schedule:
+    - cron: "0 7 * * 1"   # Mondays 07:00 UTC: AKS update
   workflow_dispatch:
+
+permissions: {}
 
 concurrency: terraform
 
-permissions:
-  id-token: write
-  contents: read
-
 jobs:
   terraform:
-    name: "Terraform"
+    name: Terraform
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: terraform-apply     # Required reviewers + Deployment branches = main
+    permissions:
+      id-token: write
+      contents: read
     env:
-      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ secrets.AZURE_APPLY_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      ARM_USE_OIDC: true
-      GITHUB_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       GITHUB_OWNER: kedacore
-      GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
-
     steps:
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-      - name: Log into Azure using OIDC
+      - name: Pre-check
+        run: python3 .github/scripts/terraform-precheck.py terraform
+
+      - name: Create GitHub App token for the github provider (only repository secrets)
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.TF_APP_ID }}
+          private-key: ${{ secrets.TF_APP_PRIVATE_KEY }}
+          owner: kedacore
+          repositories: keda,keda-performance,testing-infrastructure   # only the ones Terraform writes to
+
+      - name: Log into Azure (apply identity)
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-id: ${{ secrets.AZURE_APPLY_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Log into AWS using OIDC
+      - name: Log into AWS (apply role)
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ secrets.AWS_APPLY_ROLE_TO_ASSUME }}
           aws-region: eu-west-2
 
-      - name: Log into GCP using OIDC
+      - name: Log into GCP (apply service account)
         uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          service_account: ${{ secrets.GCP_APPLY_SERVICE_ACCOUNT }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_wrapper: false
 
-      - name: Terraform Init
+      - name: Terraform init
+        env:
+          BACKEND_SA: ${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}
+          BACKEND_CONTAINER: ${{ secrets.BACKEND_STORAGE_CONTAINER_NAME }}
+          BACKEND_RG: ${{ secrets.BACKEND_STORAGE_RESOURCE_GROUP_NAME }}
         run: |
-          terraform init \
-          -backend-config=storage_account_name=${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME}} \
-          -backend-config=container_name=${{ secrets.BACKEND_STORAGE_CONTAINER_NAME}} \
-          -backend-config=resource_group_name=${{ secrets.BACKEND_STORAGE_RESOURCE_GROUP_NAME}}
+          terraform init -input=false \
+            -backend-config="storage_account_name=${BACKEND_SA}" \
+            -backend-config="container_name=${BACKEND_CONTAINER}" \
+            -backend-config="resource_group_name=${BACKEND_RG}"
         working-directory: terraform
 
-      - name: Terraform Plan
-        run: terraform plan -out=plan.tfplan
+      - name: Terraform plan
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: terraform plan -input=false -out=plan.tfplan
         working-directory: terraform
 
-      - name: Terraform Apply
+      - name: Terraform apply
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: terraform apply -input=false -auto-approve plan.tfplan
         working-directory: terraform
