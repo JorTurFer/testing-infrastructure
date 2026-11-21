@@ -29,7 +29,7 @@ All of them are safe to run on untrusted code because they have no credentials:
 - `actionlint` and `zizmor` on the workflows (dangerous triggers, template injection, unpinned actions, excessive permissions).
 - `go vet` and `go test` for the garbage collector.
 - Dependency review (vulnerable or newly added dependencies).
-- Dependabot keeps GitHub Actions, Go modules and Terraform providers up to date.
+- Renovate (`.github/renovate.json5`, same conventions as the other kedacore repositories) keeps GitHub Actions (pinned by digest), Go modules, Docker images and Terraform providers up to date. Terraform providers are grouped in one pull request on the first day of each month; since it changes the provider lock file, the `terraform` job fails on it until a maintainer reviews and merges it.
 
 Ideas to add later, if they become worth it: secret scanning (for example gitleaks), `terraform test` for the modules, a cost estimate on the plan after the merge (Infracost), and a plan shown to reviewers before the merge **only if** it can run without reading the state (for example against an empty state with mock providers).
 
@@ -48,4 +48,4 @@ Ideas to add later, if they become worth it: secret scanning (for example gitlea
 
 ## Residual risks (accepted)
 - Whoever can merge to `main` can run code with the plan identity, and (with the approval of a second maintainer) with the apply identity. Review `terraform/` and `.github/` changes with that in mind, including changes to IAM, providers, `data "external"`-like sources and anything that creates credentials.
-- Actions are referenced by version for readability; pin them by SHA (Dependabot can keep them updated).
+- Actions are referenced by version until Renovate (`config:best-practices`) opens the pull request that pins them by digest.

@@ -1,0 +1,44 @@
+// Same conventions as the other kedacore repositories (see kedacore/keda .github/renovate.json5).
+{
+  $schema: "https://docs.renovatebot.com/renovate-schema.json",
+  extends: [
+    // Includes pinning GitHub Actions and Docker images by digest.
+    "config:best-practices",
+    "schedule:weekly",
+    ":gitSignOff", // this repository requires DCO sign-off
+    ":prHourlyLimitNone",
+  ],
+  commitBodyTable: true,
+  commitMessagePrefix: "Dependencies:",
+  labels: ["dependencies"],
+  // Give malware scanners and the community time to flag a bad release before we pull it in.
+  // Security fixes are not delayed (vulnerabilityAlerts has no minimumReleaseAge).
+  minimumReleaseAge: "3 days",
+  osvVulnerabilityAlerts: true,
+  // Keep .terraform.lock.hcl in sync with the provider versions.
+  postUpdateOptions: ["terraformUpdateLock"],
+  packageRules: [
+    // Registries rarely expose a release timestamp for a tag; fail open for docker only.
+    {
+      matchDatasources: ["docker"],
+      minimumReleaseAgeBehaviour: "timestamp-optional",
+    },
+    {
+      matchManagers: ["github-actions"],
+      matchUpdateTypes: ["minor", "patch", "digest", "pin", "pinDigest"],
+      groupName: "GitHub Actions (non-major)",
+    },
+    {
+      matchManagers: ["gomod"],
+      matchUpdateTypes: ["minor", "patch", "digest"],
+      groupName: "Go Dependencies (non-major)",
+    },
+    // Terraform providers once a month: the PR changes the provider lock file, so the `Validate PR` terraform job
+    // (which uses the lock file from main) fails until a maintainer reviews and merges it (see .github/CI-SECURITY.md).
+    {
+      matchManagers: ["terraform"],
+      groupName: "Terraform providers and modules",
+      schedule: ["* 0-6 1 * *"],
+    },
+  ],
+}
