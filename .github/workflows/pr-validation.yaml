@@ -10,7 +10,7 @@
 #   - No data controlled by the pull request is interpolated inside `run:` or `script:`; it is passed through `env:` or files.
 #   - `terraform init` uses the provider lock file from `main`, in read-only mode: a pull request cannot make this job
 #     download and run a different provider. Provider upgrades therefore fail here until they are merged by a maintainer.
-#   - `uses:` should be pinned by SHA before merging (versions are used here for readability; let Renovate/Dependabot pin them).
+#   - `uses:` should be pinned by SHA before merging (versions are used here for readability; let Renovate pin them).
 #   See .github/CI-SECURITY.md.
 
 name: Validate PR
@@ -21,7 +21,7 @@ on:
       - "terraform/**"
       - "garbage-collector/**"
       - ".github/workflows/**"
-      - ".github/dependabot.yml"
+      - ".github/renovate.json5"
 
 permissions: {}   # nothing by default; each job asks for the minimum
 
