@@ -39,6 +39,12 @@ resource "azuread_application" "oauth2_api" {
 
   identifier_uris = [local.application_identifier]
 
+  # The owners are managed outside Terraform: the identity that applies this configuration must own the application to be
+  # able to manage it (Application.ReadWrite.OwnedBy), and without this the plan removes it as an owner.
+  lifecycle {
+    ignore_changes = [owners]
+  }
+
   dynamic "app_role" {
     for_each = var.app_roles
     content {
