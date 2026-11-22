@@ -24,6 +24,11 @@ on:
   schedule:
     - cron: "0 7 * * 1"   # Mondays 07:00 UTC: AKS update
   workflow_dispatch:
+    inputs:
+      replace:
+        description: "Resource addresses to replace (comma separated), for example to regenerate credentials: module.a.random_password.b,module.c.d.e. Leave empty for a normal run."
+        required: false
+        default: ""
 
 permissions: {}
 
@@ -101,8 +106,19 @@ jobs:
       - name: Terraform plan (read-only, no state lock)
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPLACE: ${{ inputs.replace }}
         shell: bash   # explicit shell enables `pipefail`: a failed plan must fail the step even though its output goes through tee
-        run: terraform plan -no-color -input=false -lock=false 2>&1 | tee ../plan.txt
+        run: |
+          args=()
+          if [ -n "${REPLACE:-}" ]; then
+            IFS=',' read -ra items <<< "$REPLACE"
+            for a in "${items[@]}"; do
+              a="${a//[[:space:]]/}"
+              [[ "$a" =~ ^[]A-Za-z0-9_.[-]+$ ]] || { echo "Invalid resource address: $a"; exit 1; }
+              args+=("-replace=$a")
+            done
+          fi
+          terraform plan -no-color -input=false -lock=false "${args[@]}" 2>&1 | tee ../plan.txt
         working-directory: terraform
 
       - name: Publish the plan in the run summary (as text, never as code)
@@ -189,7 +205,18 @@ jobs:
       - name: Terraform plan
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: terraform plan -input=false -out=plan.tfplan
+          REPLACE: ${{ inputs.replace }}
+        run: |
+          args=()
+          if [ -n "${REPLACE:-}" ]; then
+            IFS=',' read -ra items <<< "$REPLACE"
+            for a in "${items[@]}"; do
+              a="${a//[[:space:]]/}"
+              [[ "$a" =~ ^[]A-Za-z0-9_.[-]+$ ]] || { echo "Invalid resource address: $a"; exit 1; }
+              args+=("-replace=$a")
+            done
+          fi
+          terraform plan -input=false -out=plan.tfplan "${args[@]}"
         working-directory: terraform
 
       - name: Terraform apply
