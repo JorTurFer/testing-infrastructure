@@ -15,16 +15,3 @@ variable "repository" {
   type        = string
   description = "Repository where secrets will be created/updated"
 }
-
-variable "performance_repository" {
-  default     = "kedacore/keda-performance"
-  type        = string
-  description = "Repository where secrets will be created/updated"
-}
-
-
-variable "grafana_slug" {
-  default     = "kedacore"
-  type        = string
-  description = "Grafana Cloud slug"
-}

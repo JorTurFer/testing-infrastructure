@@ -1,151 +1,175 @@
-name: 'Validate PR'
+# Validate a pull request WITHOUT any cloud credentials.
+#
+# Every job here runs with the `pull_request` trigger, `contents: read` only, no secrets, no OIDC token and no write
+# permissions, so it is safe to run on any pull request (forks included). There is deliberately no `terraform plan`
+# against the real infrastructure: a plan needs read access to the state, and the state contains secrets. The real plan
+# runs after the merge (see main.yaml) and nothing is applied without the approval of the `terraform-apply` environment.
+#
+# Rules this file follows (do not relax them):
+#   - No `pull_request_target`, no `gh pr checkout`, no secrets, no `id-token` permission, no environments.
+#   - No data controlled by the pull request is interpolated inside `run:` or `script:`; it is passed through `env:` or files.
+#   - `terraform init` uses the provider lock file from `main`, in read-only mode: a pull request cannot make this job
+#     download and run a different provider. Provider upgrades therefore fail here until they are merged by a maintainer.
+#   - `uses:` should be pinned by SHA before merging (versions are used here for readability; let Renovate pin them).
+
+name: Validate PR
 
 on:
-  - pull_request_target
+  pull_request:
+    paths:
+      - "terraform/**"
+      - "garbage-collector/**"
+      - ".github/workflows/**"
+      - ".github/renovate.json5"
 
-concurrency: terraform
+permissions: {}   # nothing by default; each job asks for the minimum
 
-permissions:
-  id-token: write
-  contents: read
-  pull-requests: read
+concurrency:
+  group: pr-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   terraform:
-    name: 'Terraform'
+    name: Terraform (fmt, validate, tflint)
     runs-on: ubuntu-latest
-    env:
-      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      ARM_USE_OIDC: true      
-      GITHUB_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
-      GITHUB_OWNER: kedacore
-      GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
-
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
-    - name: Checkout
-      uses: actions/checkout@v7
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-    - name: Checkout Pull Request
-      env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      id: checkout
-      run: |
-        gh pr checkout ${{ github.event.number }}
+      - name: Checkout the provider lock file from main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+          sparse-checkout-cone-mode: false   # the list is a single file
+          sparse-checkout: |
+            terraform/.terraform.lock.hcl
 
-    - name: Log into Azure using OIDC
-      uses: azure/login@v3
-      with:
-        client-id: ${{ secrets.AZURE_CLIENT_ID }}
-        tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-        subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Report changes to the provider lock file
+        run: |
+          if ! diff -q trusted/terraform/.terraform.lock.hcl terraform/.terraform.lock.hcl >/dev/null; then
+            echo "::warning file=terraform/.terraform.lock.hcl::The lock file differs from main. This job uses the one from main, so a provider change fails here until a maintainer reviews and merges it."
+          fi
+          cp trusted/terraform/.terraform.lock.hcl terraform/.terraform.lock.hcl
 
-    - name: Log into AWS using OIDC
-      uses: aws-actions/configure-aws-credentials@v6
-      with:
-        role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
-        aws-region: eu-west-2
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_wrapper: false
 
-    - name: Log into GCP using OIDC
-      uses: google-github-actions/auth@v3
-      with:
-        workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-        service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      - name: Terraform fmt
+        run: terraform fmt -recursive -check -diff
+        working-directory: terraform
 
-    - name: Setup Terraform
-      uses: hashicorp/setup-terraform@v4.0.1
+      - name: Terraform init (no backend, no credentials, lock file from main)
+        run: terraform init -backend=false -input=false -lockfile=readonly
+        working-directory: terraform
 
-    - name: Setup TFLint
-      uses: terraform-linters/setup-tflint@v6
+      - name: Terraform validate
+        run: terraform validate -no-color
+        working-directory: terraform
 
-    - name: Terraform Format
-      id: fmt
-      run: terraform fmt -recursive -check
-      continue-on-error: true
-      working-directory: terraform
+      - name: Setup TFLint
+        uses: terraform-linters/setup-tflint@v6
 
-    - name: Init TFLint
-      run: tflint --init
-      working-directory: terraform
+      - name: TFLint
+        env:
+          GITHUB_TOKEN: ${{ github.token }}   # read-only; only used by `tflint --init` to download the pinned plugins
+        run: |
+          tflint --init
+          tflint --recursive --format compact
+        working-directory: terraform
 
-    - name: Run TFLint
-      run: tflint -f compact
-      id: lint
-      continue-on-error: true
-      working-directory: terraform
+  security-scan:
+    name: Terraform security scan (Trivy)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-    - name: Terraform Init
-      id: init
-      run: |
-        terraform init \
-        -backend-config=storage_account_name=${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME}} \
-        -backend-config=container_name=${{ secrets.BACKEND_STORAGE_CONTAINER_NAME}} \
-        -backend-config=resource_group_name=${{ secrets.BACKEND_STORAGE_RESOURCE_GROUP_NAME}} \
-        -backend-config=subscription_id="$ARM_SUBSCRIPTION_ID"
-      working-directory: terraform
+      # Report-only for now: the existing code has findings nobody has triaged. Set `exit-code: "1"` once they are
+      # fixed or ignored (.trivyignore) so that new misconfigurations fail the check.
+      - name: Scan the Terraform for misconfigurations
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: terraform
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          format: table
 
-    - name: Terraform Validate
-      id: validate
-      run: terraform validate -no-color
-      working-directory: terraform
+  workflows:
+    name: GitHub Actions workflows (actionlint, zizmor)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-    - name: Terraform Plan
-      id: plan
-      run: terraform plan -no-color -input=false
-      continue-on-error: true
-      working-directory: terraform
+      - name: actionlint
+        uses: docker://rhysd/actionlint:1.7.12
 
-    - name: Create the plan summary
-      uses: actions/github-script@v9
-      if: always()
-      id: summary
-      env:
-        PLAN: '${{ steps.plan.outputs.stdout }}'
-      with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
-        script: |
-          // 1. Prep the output
-          const output = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
-          #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
-          #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
-          <details><summary>Validation Output</summary>
+      # Static analysis of the workflows themselves: dangerous triggers, template injection, unpinned actions,
+      # excessive permissions, credential persistence...
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@v0.8.1
+        with:
+          advanced-security: false   # print the findings; uploading SARIF would need `security-events: write`
 
-          \`\`\`\n
-          ${{ steps.validate.outputs.stdout }}
-          \`\`\`
+  go:
+    name: Garbage collector (vet, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-          </details>
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: garbage-collector/go.mod
+          cache: false
 
-          #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
-          
-          <details><summary>Show Plan</summary>
-          
-          \`\`\`\n
-          ${process.env.PLAN}
-          \`\`\`
-          
-          </details>
-          
-          *Pusher: @${{ github.actor }}*`;
-          
-          // 2. Set the output variable
-          const fs = require('fs');
-          fs.writeFileSync('summary.md', output);
-          core.setOutput('summary', output);
+      - name: go vet
+        run: go vet ./...
+        working-directory: garbage-collector
 
-    - name: Write the step summary
-      if: always()
-      run: cat summary.md >> $GITHUB_STEP_SUMMARY
+      - name: go test
+        run: go test ./...
+        working-directory: garbage-collector
 
-    - name: Terraform Format Status
-      if: steps.fmt.outcome == 'failure'
-      run: exit 1
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-    - name: Terraform Lint Status
-      if: steps.lint.outcome == 'failure'
-      run: exit 1
-
-    - name: Terraform Plan Status
-      if: steps.plan.outcome == 'failure'
-      run: exit 1
+      - name: Review new or changed dependencies (known vulnerabilities, licenses)
+        uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: high

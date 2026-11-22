@@ -1,36 +1,45 @@
 name: "Garbage Collector"
 
+# Deletes stale e2e resources. It only runs code from `main` and uses its own cloud identities, which can only list and delete
+# the services the garbage collector cleans (GCP Spanner instances; AWS aps, dynamodb, kinesis and sqs; Azure cosmos, event hubs
+# and resource deletion). They are not the Terraform identities.
+
 on:
   schedule:
     - cron: "0 */12 * * *"
   workflow_dispatch:
 
-permissions:
-  id-token: write
-  contents: read
+permissions: {}
 
 jobs:
   cleanup:
     name: "Delete Stale Cloud Resources"
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-slim
+    environment: e2e-cleanup   # scopes the secrets and the OIDC subject; no required reviewers (it runs on a schedule)
+    permissions:
+      id-token: write
+      contents: read
     env:
       MAX_AGE_HOURS: "12"
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Log into Azure using OIDC
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-id: ${{ secrets.AZURE_CLEANUP_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Log into AWS using OIDC
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ secrets.AWS_CLEANUP_ROLE_TO_ASSUME }}
           aws-region: eu-west-2
 
       - name: Log into GCP using OIDC
@@ -38,7 +47,7 @@ jobs:
         uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          service_account: ${{ secrets.GCP_CLEANUP_SERVICE_ACCOUNT }}
 
       - name: Setup Go
         uses: actions/setup-go@v7

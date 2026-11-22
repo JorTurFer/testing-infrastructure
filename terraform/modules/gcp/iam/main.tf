@@ -9,10 +9,24 @@ resource "google_service_account_key" "credentials" {
   service_account_id = google_service_account.service_account.name
 }
 
+locals {
+  # Roles needed by the e2e tests. They come from the Admin Activity audit logs of this service account (Pub/Sub,
+  # Secret Manager, Cloud Tasks, Spanner and Cloud Storage). It must NOT be roles/owner or any role that can change IAM or
+  # create compute: the key of this service account lives in the Terraform state and in repository secrets.
+  e2e_roles = toset(concat([
+    "roles/pubsub.admin",
+    "roles/secretmanager.admin",
+    "roles/cloudtasks.admin",
+    "roles/spanner.admin",
+    "roles/storage.admin",
+  ], var.additional_e2e_roles))
+}
+
 resource "google_project_iam_member" "project" {
-  project = data.google_project.project.project_id
-  role    = "roles/owner"
-  member  = "serviceAccount:${google_service_account.service_account.email}"
+  for_each = local.e2e_roles
+  project  = data.google_project.project.project_id
+  role     = each.value
+  member   = "serviceAccount:${google_service_account.service_account.email}"
 }
 
 resource "google_iam_workload_identity_pool" "pools" {
