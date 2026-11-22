@@ -20,6 +20,17 @@ removed {
   }
 }
 
+// The TF_GRAFANA_* secrets of keda-performance were deleted by hand. The apply token is limited to the repositories this
+// configuration still manages, so it cannot even read them (403 on refresh): forget them instead of destroying them.
+// This block can be deleted after the first apply that runs with it.
+removed {
+  from = module.github__performance_secrets
+
+  lifecycle {
+    destroy = false
+  }
+}
+
 // ====== GCP ======
 
 module "gcp_apis" {
