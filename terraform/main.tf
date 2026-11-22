@@ -598,17 +598,3 @@ module "aws_cleanup_identity" {
   github_repository  = var.infrastructure_repository
   github_environment = var.cleanup_environment
 }
-
-// The identifiers (not credentials) the Garbage Collector workflow needs, in its GitHub environment.
-resource "github_actions_environment_secret" "cleanup" {
-  for_each = {
-    AZURE_CLEANUP_CLIENT_ID     = module.azure_cleanup_identity.client_id
-    AWS_CLEANUP_ROLE_TO_ASSUME  = module.aws_cleanup_identity.role_arn
-    GCP_CLEANUP_SERVICE_ACCOUNT = module.gcp_cleanup_identity.email
-  }
-
-  repository      = element(split("/", var.infrastructure_repository), 1)
-  environment     = var.cleanup_environment
-  secret_name     = each.key
-  plaintext_value = each.value
-}
