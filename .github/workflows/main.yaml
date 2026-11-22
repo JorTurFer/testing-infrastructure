@@ -40,7 +40,7 @@ jobs:
     outputs:
       has_changes: ${{ steps.plan.outputs.has_changes }}
     env:
-      TF_VAR_sql_admin_object_id: ${{ vars.TF_SQL_ADMIN_OBJECT_ID }}   # same value in plan and apply (they use different identities)
+      TF_VAR_apply_principal_object_id: ${{ vars.TF_APPLY_PRINCIPAL_OBJECT_ID }}   # same value in plan and apply (they use different identities)
       ARM_USE_OIDC: "true"
       # Authenticate to the state storage with Azure AD (Blob Data roles) instead of letting the backend list the storage
       # account keys, which would give the (read-only) plan identity full write access to the state.
@@ -149,7 +149,7 @@ jobs:
       id-token: write
       contents: read
     env:
-      TF_VAR_sql_admin_object_id: ${{ vars.TF_SQL_ADMIN_OBJECT_ID }}
+      TF_VAR_apply_principal_object_id: ${{ vars.TF_APPLY_PRINCIPAL_OBJECT_ID }}
       ARM_USE_OIDC: "true"
       # Authenticate to the state storage with Azure AD (Blob Data roles) instead of letting the backend list the storage
       # account keys, which would give the (read-only) plan identity full write access to the state.
