@@ -27,20 +27,6 @@ resource "azurerm_key_vault" "vault" {
   tags = var.tags
 }
 
-resource "azurerm_key_vault_access_policy" "default_access_policy" {
-  key_vault_id = azurerm_key_vault.vault.id
-  tenant_id    = var.tenant_id
-  object_id    = var.access_object_id
-
-  secret_permissions = [
-    "Get",
-    "Set",
-    "List",
-    "Delete",
-    "Recover"
-  ]
-}
-
 resource "azurerm_key_vault_access_policy" "msi_access_policy" {
   count        = length(var.key_vault_applications)
   key_vault_id = azurerm_key_vault.vault.id
@@ -56,6 +42,9 @@ resource "azurerm_key_vault_access_policy" "msi_access_policy" {
   ]
 }
 
+// The identities that run Terraform (plan and apply) get their access policy on this vault by hand (az keyvault set-policy with
+// get/list/set/delete/recover on secrets for the apply identity, get/list for the plan one). Terraform needs to read the
+// secrets below while refreshing, before it could create a policy for the identity that is running it.
 resource "azurerm_key_vault_secret" "secrets" {
   count        = length(var.secrets)
   name         = var.secrets[count.index].name
