@@ -1,19 +1,9 @@
-terraform {
-  required_providers {
-    mssql = {
-      source = "betr-io/mssql"
-    }
-  }
-}
-
 provider "azurerm" {
   features {}
 }
 
 locals {
-  sql_server_name         = "${var.unique_project_name}-e2e-sql-server"
-  sql_server_network_name = "${var.unique_project_name}-e2e-sql-server-net"
-  sql_server_subnet_name  = "${var.unique_project_name}-e2e-sql-server-subnet"
+  sql_server_name = "${var.unique_project_name}-e2e-sql-server"
 }
 
 data "azurerm_client_config" "current" {}

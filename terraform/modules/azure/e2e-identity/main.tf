@@ -1,14 +1,3 @@
-terraform {
-  required_providers {
-    azuread = {
-      source = "hashicorp/azuread"
-    }
-    azurerm = {
-      source = "hashicorp/azurerm"
-    }
-  }
-}
-
 // Identity used by the e2e tests: `az login` to reach the clusters and as the credentials of the Azure scalers under test.
 // It is NOT the identity that runs Terraform. It has a client secret (the tests need a static credential) and only the roles
 // below on the resource group, never Owner.

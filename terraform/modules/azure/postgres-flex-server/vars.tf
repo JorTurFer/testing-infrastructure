@@ -19,12 +19,6 @@ variable "tags" {
   description = "Tags to apply on resources accepting it"
 }
 
-variable "postgres_runtime_version" {
-  type        = string
-  description = "Postgres version to use"
-  default     = "14"
-}
-
 variable "postgres_sku_name" {
   type        = string
   description = "The SKU Name for the PostgreSQL Flexible Server"

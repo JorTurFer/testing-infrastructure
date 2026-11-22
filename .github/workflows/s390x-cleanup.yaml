@@ -4,6 +4,8 @@ on:
   schedule:
     - cron: '0 * * * *'
   workflow_dispatch: 
+permissions: {}
+
 jobs:
   cleanup:
     name: Delete Stale Clusters
@@ -46,9 +48,7 @@ jobs:
             
             # Convert the creation timestamp to seconds since the epoch
             # Note: The 'date -d' command usually recognizes Docker's ISO 8601 format.
-            CREATE_SECONDS=$(date -d "$CREATE_DATE" +%s 2>/dev/null)
-            
-            if [ $? -ne 0 ] || [ -z "$CREATE_SECONDS" ]; then
+            if ! CREATE_SECONDS=$(date -d "$CREATE_DATE" +%s 2>/dev/null) || [ -z "$CREATE_SECONDS" ]; then
                 echo "⚠️ Error converting date '$CREATE_DATE' to seconds for cluster: $cluster"
                 continue
             fi

@@ -1,0 +1,12 @@
+# actionlint configuration (https://github.com/rhysd/actionlint/blob/main/docs/config.md)
+self-hosted-runner:
+  labels:
+    - s390x
+
+paths:
+  # actionlint 1.7.12 still has the metadata of actions/create-github-app-token@v3 with the deprecated `app-id` input, but the
+  # action accepts `client-id`. Remove these two patterns when actionlint knows the new input.
+  .github/workflows/main.yaml:
+    ignore:
+      - 'missing input "app-id" which is required by action "actions/create-github-app-token@v3"'
+      - 'input "client-id" is not defined in action "actions/create-github-app-token@v3"'

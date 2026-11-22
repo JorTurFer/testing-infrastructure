@@ -325,9 +325,8 @@ module "azurerm_postgres_flexible_server" {
   unique_project_name = var.unique_project_name
   location            = local.location
 
-  postgres_runtime_version = "14"
-  postgres_sku_name        = "B_Standard_B1ms"
-  postgres_storage_mb      = 32768
+  postgres_sku_name   = "B_Standard_B1ms"
+  postgres_storage_mb = 32768
 
   postgres_database_name = "test_db"
 

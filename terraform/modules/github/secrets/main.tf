@@ -1,12 +1,3 @@
-terraform {
-  required_providers {
-    github = {
-      source  = "integrations/github"
-      version = "=5.34.0"
-    }
-  }
-}
-
 data "github_repository" "repo" {
   full_name = var.repository
 }
