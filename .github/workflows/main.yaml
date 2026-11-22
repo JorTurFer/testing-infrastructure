@@ -101,6 +101,7 @@ jobs:
       - name: Terraform plan (read-only, no state lock)
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        shell: bash   # explicit shell enables `pipefail`: a failed plan must fail the step even though its output goes through tee
         run: terraform plan -no-color -input=false -lock=false 2>&1 | tee ../plan.txt
         working-directory: terraform
 
