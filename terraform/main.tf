@@ -166,8 +166,7 @@ module "azure_key_vault" {
 
   unique_project_name = var.unique_project_name
 
-  access_object_id = data.azurerm_client_config.current.object_id
-  tenant_id        = data.azurerm_client_config.current.tenant_id
+  tenant_id = data.azurerm_client_config.current.tenant_id
 
   key_vault_applications = [
     module.azuread_applications.identity_1,
