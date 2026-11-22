@@ -58,7 +58,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.TF_PLAN_APP_ID }}
+          client-id: ${{ vars.TF_PLAN_APP_CLIENT_ID }}
           private-key: ${{ secrets.TF_PLAN_APP_PRIVATE_KEY }}
           owner: kedacore
           permission-metadata: read
@@ -144,7 +144,7 @@ jobs:
         id: app-token
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ vars.TF_APP_ID }}
+          client-id: ${{ vars.TF_APP_CLIENT_ID }}
           private-key: ${{ secrets.TF_APP_PRIVATE_KEY }}
           owner: kedacore
           repositories: keda,testing-infrastructure   # only the ones Terraform writes to
