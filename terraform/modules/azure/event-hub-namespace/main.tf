@@ -36,3 +36,12 @@ resource "azurerm_role_assignment" "roles" {
   role_definition_name = "Azure Event Hubs Data Owner"
   principal_id         = var.event_hub_admin_identities[count.index].principal_id
 }
+
+// The Data Owner role above only covers the data plane. Creating and deleting event hubs is a management operation, so the
+// identity that runs the e2e tests also needs Contributor, limited to this namespace.
+resource "azurerm_role_assignment" "contributors" {
+  count                = length(var.event_hub_contributor_principal_ids)
+  scope                = azurerm_eventhub_namespace.ehub_namespace.id
+  role_definition_name = "Contributor"
+  principal_id         = var.event_hub_contributor_principal_ids[count.index]
+}
