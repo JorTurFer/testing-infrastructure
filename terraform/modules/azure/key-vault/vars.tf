@@ -33,3 +33,9 @@ variable "key_vault_applications" {
   type        = list(any)
   description = "Managed identities to grant access in key vault"
 }
+
+variable "extra_principal_ids" {
+  type        = list(string)
+  description = "Object ids of other identities to grant access in key vault"
+  default     = []
+}
