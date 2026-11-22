@@ -9,11 +9,26 @@ locals {
   location          = "northeurope"
 }
 
-// ====== GRAFANA CLOUD =======
+// The Grafana Cloud module was removed from the configuration, but its resources are still in the state and destroying them
+// would need the Grafana provider (and a Grafana token). Forget them without destroying anything; revoke the access policy
+// token in Grafana Cloud by hand. This block can be deleted after the first apply that runs with it.
+removed {
+  from = module.grafana_cloud
 
-module "grafana_cloud" {
-  source = "./modules/grafana/iam"
-  slug   = var.grafana_slug
+  lifecycle {
+    destroy = false
+  }
+}
+
+// The TF_GRAFANA_* secrets of keda-performance were deleted by hand. The apply token is limited to the repositories this
+// configuration still manages, so it cannot even read them (403 on refresh): forget them instead of destroying them.
+// This block can be deleted after the first apply that runs with it.
+removed {
+  from = module.github__performance_secrets
+
+  lifecycle {
+    destroy = false
+  }
 }
 
 // ====== GCP ======
@@ -151,12 +166,14 @@ module "azure_key_vault" {
 
   unique_project_name = var.unique_project_name
 
-  tenant_id        = data.azurerm_client_config.current.tenant_id
+  tenant_id = data.azurerm_client_config.current.tenant_id
 
   key_vault_applications = [
     module.azuread_applications.identity_1,
     module.azuread_applications.identity_2
   ]
+
+  extra_principal_ids = [module.azure_e2e_identity.object_id]
 
   secrets = [
     {
@@ -175,7 +192,7 @@ module "azure_data_explorer" {
   unique_project_name = var.unique_project_name
 
   admin_principal_ids = [
-    data.azurerm_client_config.current.client_id,
+    module.azure_e2e_identity.client_id,
     module.azuread_applications.identity_1.principal_id,
     module.azuread_applications.identity_2.principal_id
   ]
@@ -412,7 +429,7 @@ module "github_secrets" {
     },
     {
       name  = "TF_AZURE_SP_APP_ID"
-      value = data.azurerm_client_config.current.client_id
+      value = module.azure_e2e_identity.client_id
     },
     {
       name  = "TF_AZURE_SP_TENANT"
@@ -546,24 +563,38 @@ module "github_secrets" {
       name  = "TF_AZURE_MANAGED_REDIS_HOST"
       value = module.azure_managed_redis.hostname
     },
+    {
+      name  = "AZURE_SP_KEY"
+      value = module.azure_e2e_identity.client_secret
+    },
   ]
 }
 
-module "github__performance_secrets" {
-  source     = "./modules/github/secrets"
-  repository = var.performance_repository
-  secrets = [
-    {
-      name  = "TF_GRAFANA_PROMETHEUS_URL"
-      value = module.grafana_cloud.prometheus_url
-    },
-    {
-      name  = "TF_GRAFANA_PROMETHEUS_USER"
-      value = module.grafana_cloud.prometheus_user
-    },
-    {
-      name  = "TF_GRAFANA_PROMETHEUS_PASSWORD"
-      value = module.grafana_cloud.prometheus_password
-    },
-  ]
+// ====== E2E AND GARBAGE COLLECTOR IDENTITIES ======
+
+module "azure_e2e_identity" {
+  source              = "./modules/azure/e2e-identity"
+  resource_group_name = var.azure_resource_group_name
+  unique_project_name = var.unique_project_name
+}
+
+module "azure_cleanup_identity" {
+  source              = "./modules/azure/cleanup-identity"
+  resource_group_name = var.azure_resource_group_name
+  unique_project_name = var.unique_project_name
+  github_repository   = var.infrastructure_repository
+  github_environment  = var.cleanup_environment
+}
+
+module "gcp_cleanup_identity" {
+  source                 = "./modules/gcp/cleanup-identity"
+  workload_identity_pool = var.gcp_github_workload_identity_pool
+  github_environment     = var.cleanup_environment
+}
+
+module "aws_cleanup_identity" {
+  source             = "./modules/aws/cleanup-identity"
+  tags               = local.tags
+  github_repository  = var.infrastructure_repository
+  github_environment = var.cleanup_environment
 }

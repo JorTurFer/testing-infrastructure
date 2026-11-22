@@ -16,15 +16,20 @@ variable "repository" {
   description = "Repository where secrets will be created/updated"
 }
 
-variable "performance_repository" {
-  default     = "kedacore/keda-performance"
+variable "infrastructure_repository" {
+  default     = "kedacore/testing-infrastructure"
   type        = string
-  description = "Repository where secrets will be created/updated"
+  description = "This repository, whose GitHub environments use the identities created here"
 }
 
-
-variable "grafana_slug" {
-  default     = "kedacore"
+variable "cleanup_environment" {
+  default     = "e2e-cleanup"
   type        = string
-  description = "Grafana Cloud slug"
+  description = "GitHub environment of the garbage collector workflow"
+}
+
+variable "gcp_github_workload_identity_pool" {
+  default     = "github-workload-federation"
+  type        = string
+  description = "GCP workload identity pool that trusts GitHub Actions (created by hand, not managed by Terraform)"
 }

@@ -1,73 +1,199 @@
-name: "Deploy infrastucture"
+# Deploy the infrastructure in two phases: a read-only `plan`, then an `apply` that needs a maintainer approval.
+#
+# Rules this file follows (do not relax them):
+#   - It only runs code from `main` (both jobs refuse to run on any other branch or ref).
+#   - `plan` runs first, with read-only identities, and publishes the plan in the run summary. The approver reads it.
+#   - `apply` uses the `terraform-apply` environment: required reviewers and deployments restricted to `main`. It never starts
+#     without a manual approval, and its cloud identities only trust that environment and this workflow file.
+#   - `apply` computes the plan again and applies it. It does NOT pass a plan file between jobs: a plan file contains the values of
+#     sensitive attributes, and artifacts of a public repository can be downloaded by anyone with read access.
+#   - The apply identities are different from the plan ones and are not AdministratorAccess / Owner.
+#   - No personal access token. The GitHub provider (which writes repository secrets) uses a token of a GitHub App. The plan job
+#     uses a read-only App; only `apply` can obtain a token with write permissions.
+#   - It never runs pull request code: the merge to `main` (reviewed by a maintainer) is the review of the Terraform that runs here.
+
+name: Deploy infrastructure
 
 on:
   push:
     branches:
       - main
     paths:
-      - "**.tf"
-      - ".github/workflows/terraform.yaml"
-  schedule: # Scheduling the job we will update AKS automatically
-    - cron: "0 7 * * 1" # Mondays at 7:00 AM
+      - "terraform/**"
+      - ".github/workflows/main.yaml"
+  schedule:
+    - cron: "0 7 * * 1"   # Mondays 07:00 UTC: AKS update
   workflow_dispatch:
+
+permissions: {}
 
 concurrency: terraform
 
-permissions:
-  id-token: write
-  contents: read
-
 jobs:
-  terraform:
-    name: "Terraform"
+  plan:
+    name: Plan (read-only identities)
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: terraform-plan
+    permissions:
+      id-token: write
+      contents: read
     env:
-      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: "true"
+      # Authenticate to the state storage with Azure AD (Blob Data roles) instead of letting the backend list the storage
+      # account keys, which would give the (read-only) plan identity full write access to the state.
+      ARM_USE_AZUREAD: "true"
+      ARM_CLIENT_ID: ${{ secrets.AZURE_PLAN_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      ARM_USE_OIDC: true
-      GITHUB_TOKEN: ${{ secrets.GH_AUTOMATION_PAT }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       GITHUB_OWNER: kedacore
-      GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
-
     steps:
-      - name: Checkout
+      - name: Checkout main
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-      - name: Log into Azure using OIDC
+      - name: Create a read-only GitHub App token for the github provider
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.TF_PLAN_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TF_PLAN_APP_PRIVATE_KEY }}
+          owner: kedacore
+          permission-metadata: read
+          permission-secrets: read
+
+      - name: Log into Azure (plan identity, read-only)
         uses: azure/login@v3
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          client-id: ${{ secrets.AZURE_PLAN_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Log into AWS using OIDC
+      - name: Log into AWS (plan role, read-only)
         uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_TO_ASSUME }}
           aws-region: eu-west-2
 
-      - name: Log into GCP using OIDC
+      - name: Log into GCP (plan service account, read-only)
         uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          service_account: ${{ secrets.GCP_PLAN_SERVICE_ACCOUNT }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_wrapper: false
 
-      - name: Terraform Init
+      - name: Terraform init
+        env:
+          BACKEND_SA: ${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}
+          BACKEND_CONTAINER: ${{ secrets.BACKEND_STORAGE_CONTAINER_NAME }}
         run: |
-          terraform init \
-          -backend-config=storage_account_name=${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME}} \
-          -backend-config=container_name=${{ secrets.BACKEND_STORAGE_CONTAINER_NAME}} \
-          -backend-config=resource_group_name=${{ secrets.BACKEND_STORAGE_RESOURCE_GROUP_NAME}}
+          terraform init -input=false \
+            -backend-config="storage_account_name=${BACKEND_SA}" \
+            -backend-config="container_name=${BACKEND_CONTAINER}"
         working-directory: terraform
 
-      - name: Terraform Plan
-        run: terraform plan -out=plan.tfplan
+      - name: Terraform plan (read-only, no state lock)
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        shell: bash   # explicit shell enables `pipefail`: a failed plan must fail the step even though its output goes through tee
+        run: terraform plan -no-color -input=false -lock=false 2>&1 | tee ../plan.txt
         working-directory: terraform
 
-      - name: Terraform Apply
+      - name: Publish the plan in the run summary (as text, never as code)
+        if: always()
+        run: |
+          {
+            echo '### Terraform plan (read this before approving the apply)'
+            echo 'Commit: `'"${GITHUB_SHA}"'`'
+            echo '```'
+            sed 's/```/` ` `/g' plan.txt | head -c 60000
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    name: Apply (requires maintainer approval)
+    needs: plan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: terraform-apply     # required reviewers + deployment branches restricted to main
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      ARM_USE_OIDC: "true"
+      # Authenticate to the state storage with Azure AD (Blob Data roles) instead of letting the backend list the storage
+      # account keys, which would give the (read-only) plan identity full write access to the state.
+      ARM_USE_AZUREAD: "true"
+      ARM_CLIENT_ID: ${{ secrets.AZURE_APPLY_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      GITHUB_OWNER: kedacore
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Create a GitHub App token for the github provider (writes repository secrets)
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.TF_APP_CLIENT_ID }}
+          private-key: ${{ secrets.TF_APP_PRIVATE_KEY }}
+          owner: kedacore
+          repositories: keda,testing-infrastructure   # only the ones Terraform writes to
+          permission-metadata: read
+          permission-secrets: write
+
+      - name: Log into Azure (apply identity)
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_APPLY_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log into AWS (apply role)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_APPLY_ROLE_TO_ASSUME }}
+          aws-region: eu-west-2
+
+      - name: Log into GCP (apply service account)
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_APPLY_SERVICE_ACCOUNT }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v4.0.1
+        with:
+          terraform_wrapper: false
+
+      - name: Terraform init
+        env:
+          BACKEND_SA: ${{ secrets.BACKEND_STORAGE_ACCOUNT_NAME }}
+          BACKEND_CONTAINER: ${{ secrets.BACKEND_STORAGE_CONTAINER_NAME }}
+        run: |
+          terraform init -input=false \
+            -backend-config="storage_account_name=${BACKEND_SA}" \
+            -backend-config="container_name=${BACKEND_CONTAINER}"
+        working-directory: terraform
+
+      - name: Terraform plan
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: terraform plan -input=false -out=plan.tfplan
+        working-directory: terraform
+
+      - name: Terraform apply
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: terraform apply -input=false -auto-approve plan.tfplan
         working-directory: terraform

@@ -24,11 +24,6 @@ variable "secrets" {
   description = "Collection of secrets (key-value) to be created in Key Vault"
 }
 
-variable "access_object_id" {
-  type        = string
-  description = "ObjectId with access to this key vault"
-}
-
 variable "tenant_id" {
   type        = string
   description = "TenantId for this key vault"
@@ -37,4 +32,10 @@ variable "tenant_id" {
 variable "key_vault_applications" {
   type        = list(any)
   description = "Managed identities to grant access in key vault"
+}
+
+variable "extra_principal_ids" {
+  type        = list(string)
+  description = "Object ids of other identities to grant access in key vault"
+  default     = []
 }
