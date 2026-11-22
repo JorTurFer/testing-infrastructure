@@ -27,8 +27,6 @@ on:
 
 permissions: {}
 
-concurrency: terraform
-
 jobs:
   plan:
     name: Plan (read-only identities)
@@ -125,6 +123,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: terraform-apply     # required reviewers + deployment branches restricted to main
+    # Only one apply at a time (they take the state lock). `plan` has no concurrency group: it is read-only and does not lock the
+    # state, so it must not wait for an apply that is pending approval. A newer pending apply replaces an older one that has not
+    # started yet, which is fine because every apply computes its own plan from the current main.
+    concurrency:
+      group: terraform-apply
+      cancel-in-progress: false
     permissions:
       id-token: write
       contents: read
