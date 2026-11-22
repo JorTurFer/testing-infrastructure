@@ -34,3 +34,8 @@ variable "event_hub_admin_identities" {
   description = "Azure Event Hubs Data Owner identities"
   default     = []
 }
+variable "event_hub_contributor_principal_ids" {
+  type        = list(string)
+  description = "Object ids of the identities that create and delete event hubs in the namespace (Contributor on the namespace only)"
+  default     = []
+}
