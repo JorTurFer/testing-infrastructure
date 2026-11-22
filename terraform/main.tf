@@ -9,6 +9,17 @@ locals {
   location          = "northeurope"
 }
 
+// The Grafana Cloud module was removed from the configuration, but its resources are still in the state and destroying them
+// would need the Grafana provider (and a Grafana token). Forget them without destroying anything; revoke the access policy
+// token in Grafana Cloud by hand. This block can be deleted after the first apply that runs with it.
+removed {
+  from = module.grafana_cloud
+
+  lifecycle {
+    destroy = false
+  }
+}
+
 // ====== GCP ======
 
 module "gcp_apis" {
