@@ -15,3 +15,21 @@ variable "repository" {
   type        = string
   description = "Repository where secrets will be created/updated"
 }
+
+variable "infrastructure_repository" {
+  default     = "kedacore/testing-infrastructure"
+  type        = string
+  description = "This repository, whose GitHub environments use the identities created here"
+}
+
+variable "cleanup_environment" {
+  default     = "e2e-cleanup"
+  type        = string
+  description = "GitHub environment of the garbage collector workflow"
+}
+
+variable "gcp_github_workload_identity_pool" {
+  default     = "github-workload-federation"
+  type        = string
+  description = "GCP workload identity pool that trusts GitHub Actions (created by hand, not managed by Terraform)"
+}

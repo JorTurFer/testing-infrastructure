@@ -42,6 +42,22 @@ resource "azurerm_key_vault_access_policy" "msi_access_policy" {
   ]
 }
 
+// Other identities (object ids) that need the same access, for example the e2e identity.
+resource "azurerm_key_vault_access_policy" "extra_access_policy" {
+  count        = length(var.extra_principal_ids)
+  key_vault_id = azurerm_key_vault.vault.id
+  tenant_id    = var.tenant_id
+  object_id    = var.extra_principal_ids[count.index]
+
+  secret_permissions = [
+    "Get",
+    "Set",
+    "List",
+    "Delete",
+    "Recover"
+  ]
+}
+
 // The identities that run Terraform (plan and apply) get their access policy on this vault by hand (az keyvault set-policy with
 // get/list/set/delete/recover on secrets for the apply identity, get/list for the plan one). Terraform needs to read the
 // secrets below while refreshing, before it could create a policy for the identity that is running it.
