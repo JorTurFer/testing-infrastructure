@@ -98,15 +98,16 @@ jobs:
         with:
           persist-credentials: false
 
-      # Report-only for now: the existing code has findings nobody has triaged. Set `exit-code: "1"` once they are
-      # fixed or ignored (.trivyignore) so that new misconfigurations fail the check.
+      # Fails on any HIGH or CRITICAL finding that is not accepted in .trivyignore.yaml (with the reason). The accepted ones
+      # are the network rules of the e2e test resources, which are only used by the tests.
       - name: Scan the Terraform for misconfigurations
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           scan-ref: terraform
           severity: HIGH,CRITICAL
-          exit-code: "0"
+          trivyignores: .trivyignore.yaml
+          exit-code: "1"
           format: table
 
   workflows:

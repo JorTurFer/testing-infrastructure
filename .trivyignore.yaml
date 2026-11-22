@@ -1,0 +1,28 @@
+# Trivy findings that are accepted because this infrastructure is only used by the e2e tests of KEDA: short lived test
+# resources without real data, reached from GitHub-hosted runners and from the test clusters, whose addresses are dynamic.
+# Any other finding (or the same one in another resource) fails the `Validate PR` check.
+misconfigurations:
+  - id: AZU-0041
+    paths:
+      - modules/azure/aks/main.tf
+    statement: The API server of the e2e clusters has to be reachable from GitHub-hosted runners, which have no fixed IP ranges.
+
+  - id: AZU-0042
+    paths:
+      - modules/azure/aks/main.tf
+    statement: Accepted for the e2e clusters, which are short lived test clusters without real workloads or data.
+
+  - id: AZU-0043
+    paths:
+      - modules/azure/aks/main.tf
+    statement: The e2e workloads need unrestricted traffic between pods and to external services.
+
+  - id: AZU-0013
+    paths:
+      - modules/azure/key-vault/main.tf
+    statement: The vault only holds test connection strings and is read from GitHub-hosted runners and from the e2e clusters (dynamic addresses).
+
+  - id: AZU-0012
+    paths:
+      - modules/azure/storage-account/main.tf
+    statement: The storage account only holds test data and is reached from GitHub-hosted runners and from the e2e clusters (dynamic addresses).
