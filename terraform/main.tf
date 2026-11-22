@@ -228,6 +228,9 @@ module "azure_event_hub_namespace" {
     module.azuread_applications.identity_2
   ]
 
+  # The e2e tests create and delete event hubs with this identity
+  event_hub_contributor_principal_ids = [module.azure_e2e_identity.object_id]
+
   tags = local.tags
 }
 
