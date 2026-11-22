@@ -6,8 +6,6 @@ locals {
   sql_server_name = "${var.unique_project_name}-e2e-sql-server"
 }
 
-data "azurerm_client_config" "current" {}
-
 data "azurerm_resource_group" "rg" {
   name = var.resource_group_name
 }
@@ -40,7 +38,7 @@ resource "azurerm_mssql_server" "server" {
 
   azuread_administrator {
     login_username = "AzureAD Admin"
-    object_id      = data.azurerm_client_config.current.object_id
+    object_id      = var.sql_admin_object_id
   }
 
   tags = var.tags

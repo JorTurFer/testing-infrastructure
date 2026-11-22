@@ -33,3 +33,13 @@ variable "gcp_github_workload_identity_pool" {
   type        = string
   description = "GCP workload identity pool that trusts GitHub Actions (created by hand, not managed by Terraform)"
 }
+
+variable "sql_admin_object_id" {
+  type        = string
+  description = "Object id of the identity that administers the SQL server (the Terraform apply identity). Set with TF_VAR_sql_admin_object_id so every run uses the same value"
+
+  validation {
+    condition     = can(regex("^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$", var.sql_admin_object_id))
+    error_message = "sql_admin_object_id must be an object id (GUID)."
+  }
+}

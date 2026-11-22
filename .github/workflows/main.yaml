@@ -37,7 +37,10 @@ jobs:
     permissions:
       id-token: write
       contents: read
+    outputs:
+      has_changes: ${{ steps.plan.outputs.has_changes }}
     env:
+      TF_VAR_sql_admin_object_id: ${{ vars.TF_SQL_ADMIN_OBJECT_ID }}   # same value in plan and apply (they use different identities)
       ARM_USE_OIDC: "true"
       # Authenticate to the state storage with Azure AD (Blob Data roles) instead of letting the backend list the storage
       # account keys, which would give the (read-only) plan identity full write access to the state.
@@ -98,10 +101,22 @@ jobs:
         working-directory: terraform
 
       - name: Terraform plan (read-only, no state lock)
+        id: plan
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-        shell: bash   # explicit shell enables `pipefail`: a failed plan must fail the step even though its output goes through tee
-        run: terraform plan -no-color -input=false -lock=false 2>&1 | tee ../plan.txt
+        shell: bash
+        run: |
+          # -detailed-exitcode: 0 = no changes, 2 = changes, 1 = error. The output goes through tee, so read the exit code of
+          # terraform itself and fail the step on any error.
+          set +e
+          terraform plan -no-color -input=false -lock=false -detailed-exitcode 2>&1 | tee ../plan.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          case "$code" in
+            0) echo "has_changes=false" >> "$GITHUB_OUTPUT" ;;
+            2) echo "has_changes=true" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$code" ;;
+          esac
         working-directory: terraform
 
       - name: Publish the plan in the run summary (as text, never as code)
@@ -119,7 +134,8 @@ jobs:
   apply:
     name: Apply (requires maintainer approval)
     needs: plan
-    if: github.ref == 'refs/heads/main'
+    # Nothing to apply (and nothing to approve) when the plan has no changes
+    if: github.ref == 'refs/heads/main' && needs.plan.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: terraform-apply     # required reviewers + deployment branches restricted to main
@@ -133,6 +149,7 @@ jobs:
       id-token: write
       contents: read
     env:
+      TF_VAR_sql_admin_object_id: ${{ vars.TF_SQL_ADMIN_OBJECT_ID }}
       ARM_USE_OIDC: "true"
       # Authenticate to the state storage with Azure AD (Blob Data roles) instead of letting the backend list the storage
       # account keys, which would give the (read-only) plan identity full write access to the state.

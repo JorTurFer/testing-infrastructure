@@ -348,7 +348,8 @@ module "azurerm_sql_server" {
   sql_sku_name   = "Basic"
   sql_storage_gb = 1
 
-  sql_database_name = "test_db"
+  sql_database_name   = "test_db"
+  sql_admin_object_id = var.sql_admin_object_id
 
   user_managed_identity_sql_ad_admin = module.azuread_applications.identity_1
 

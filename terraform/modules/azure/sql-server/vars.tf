@@ -46,3 +46,8 @@ variable "user_managed_identity_sql_ad_admin" {
   type        = any
   description = "User managed identitiy that will be granted admin access on the SQL server"
 }
+
+variable "sql_admin_object_id" {
+  type        = string
+  description = "Object id of the identity that is the Microsoft Entra administrator of the server. It is an input (not the identity that runs Terraform) so plan and apply, which run with different identities, compute the same value"
+}
