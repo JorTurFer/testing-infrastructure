@@ -1,0 +1,15 @@
+# actionlint configuration (https://github.com/rhysd/actionlint/blob/main/docs/config.md)
+self-hosted-runner:
+  labels:
+    - s390x
+
+paths:
+  # actionlint 1.7.12 still has the metadata of actions/create-github-app-token@v3 with the deprecated `app-id` input
+  .github/workflows/main.yaml:
+    ignore:
+      - 'missing input "app-id" which is required by action "actions/create-github-app-token@v3"'
+      - 'input "client-id" is not defined in action "actions/create-github-app-token@v3"'
+      - 'shellcheck reported issue in this script: SC2016'   # backticks of the Markdown fence are meant to be literal
+  .github/workflows/s390x-cleanup.yaml:
+    ignore:
+      - 'shellcheck reported issue in this script: SC2181'

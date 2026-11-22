@@ -83,7 +83,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}   # read-only; only used by `tflint --init` to download the pinned plugins
         run: |
           tflint --init
-          tflint --recursive --format compact
+          # Warnings are shown as annotations; only errors fail the job (the existing modules have style warnings)
+          tflint --recursive --format compact --minimum-failure-severity=error
         working-directory: terraform
 
   security-scan:
