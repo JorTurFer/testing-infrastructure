@@ -1,14 +1,3 @@
-terraform {
-  required_providers {
-    azuread = {
-      source = "hashicorp/azuread"
-    }
-    azurerm = {
-      source = "hashicorp/azurerm"
-    }
-  }
-}
-
 // Keyless identity of the Garbage Collector workflow. It only trusts the GitHub environment of this repository.
 
 data "azuread_client_config" "current" {}

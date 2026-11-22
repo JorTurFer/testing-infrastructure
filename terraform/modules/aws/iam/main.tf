@@ -10,7 +10,7 @@ locals {
       {
         Effect : "Allow",
         Principal : {
-          "Federated" : "${provider.arn}"
+          "Federated" : provider.arn
         },
         Action : "sts:AssumeRoleWithWebIdentity",
         Condition : {

@@ -36,12 +36,6 @@ variable "sql_storage_gb" {
   description = "The max storage allowed"
   default     = 5
 }
-
-variable "sql_vcores" {
-  type        = number
-  description = "The vcores allowed"
-  default     = 1
-}
 variable "sql_database_name" {
   type        = string
   description = "Database name to create inside the server"

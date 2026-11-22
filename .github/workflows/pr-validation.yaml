@@ -10,7 +10,7 @@
 #   - No data controlled by the pull request is interpolated inside `run:` or `script:`; it is passed through `env:` or files.
 #   - `terraform init` uses the provider lock file from `main`, in read-only mode: a pull request cannot make this job
 #     download and run a different provider. Provider upgrades therefore fail here until they are merged by a maintainer.
-#   - `uses:` should be pinned by SHA before merging (versions are used here for readability; let Renovate pin them).
+#   - Every `uses:` is pinned by commit SHA (the comment keeps the version); Renovate keeps them updated.
 
 name: Validate PR
 
@@ -37,12 +37,12 @@ jobs:
       contents: read
     steps:
       - name: Checkout PR
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
       - name: Checkout the provider lock file from main
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: main
           path: trusted
@@ -59,7 +59,7 @@ jobs:
           cp trusted/terraform/.terraform.lock.hcl terraform/.terraform.lock.hcl
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4.0.1
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_wrapper: false
 
@@ -76,15 +76,14 @@ jobs:
         working-directory: terraform
 
       - name: Setup TFLint
-        uses: terraform-linters/setup-tflint@v6
+        uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6
 
       - name: TFLint
         env:
           GITHUB_TOKEN: ${{ github.token }}   # read-only; only used by `tflint --init` to download the pinned plugins
         run: |
           tflint --init
-          # Warnings are shown as annotations; only errors fail the job (the existing modules have style warnings)
-          tflint --recursive --format compact --minimum-failure-severity=error
+          tflint --recursive --format compact
         working-directory: terraform
 
   security-scan:
@@ -95,14 +94,14 @@ jobs:
       contents: read
     steps:
       - name: Checkout PR
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
       # Report-only for now: the existing code has findings nobody has triaged. Set `exit-code: "1"` once they are
       # fixed or ignored (.trivyignore) so that new misconfigurations fail the check.
       - name: Scan the Terraform for misconfigurations
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: config
           scan-ref: terraform
@@ -118,17 +117,17 @@ jobs:
       contents: read
     steps:
       - name: Checkout PR
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
       - name: actionlint
-        uses: docker://rhysd/actionlint:1.7.12
+        uses: docker://rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
 
       # Static analysis of the workflows themselves: dangerous triggers, template injection, unpinned actions,
       # excessive permissions, credential persistence...
       - name: zizmor
-        uses: zizmorcore/zizmor-action@v0.8.1
+        uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
         with:
           advanced-security: false   # print the findings; uploading SARIF would need `security-events: write`
 
@@ -140,12 +139,12 @@ jobs:
       contents: read
     steps:
       - name: Checkout PR
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
       - name: Setup Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
         with:
           go-version-file: garbage-collector/go.mod
           cache: false
@@ -166,11 +165,11 @@ jobs:
       contents: read
     steps:
       - name: Checkout PR
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
       - name: Review new or changed dependencies (known vulnerabilities, licenses)
-        uses: actions/dependency-review-action@v5
+        uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5
         with:
           fail-on-severity: high

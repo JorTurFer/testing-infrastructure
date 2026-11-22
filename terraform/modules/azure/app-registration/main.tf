@@ -1,11 +1,3 @@
-terraform {
-  required_providers {
-    azuread = {
-      source = "hashicorp/azuread"
-    }
-  }
-}
-
 locals {
   application_name       = "${var.unique_project_name}-${var.application_purpose}"
   application_identifier = "api://${local.application_name}"
