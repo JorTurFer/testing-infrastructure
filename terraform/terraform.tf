@@ -38,6 +38,10 @@ terraform {
       source  = "betr-io/mssql"
       version = "0.3.1"
     }
+    github = {
+      source  = "integrations/github"
+      version = "=5.34.0"
+    }
   }
 }
 

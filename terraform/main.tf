@@ -109,7 +109,7 @@ module "acr_proxy" {
 module "azure_aks_pr" {
   source              = "./modules/azure/aks"
   resource_group_name = var.azure_resource_group_name
-  kubernetes_version  = "1.36"
+  kubernetes_version  = "1.37"
   cluster_name        = local.pr_cluster_name
   unique_project_name = var.unique_project_name
   location            = local.location
@@ -136,7 +136,7 @@ module "azure_aks_pr" {
 module "azure_aks_nightly" {
   source              = "./modules/azure/aks"
   resource_group_name = var.azure_resource_group_name
-  kubernetes_version  = "1.36"
+  kubernetes_version  = "1.37"
   cluster_name        = local.main_cluster_name
   unique_project_name = var.unique_project_name
   location            = local.location
@@ -173,6 +173,8 @@ module "azure_key_vault" {
     module.azuread_applications.identity_2
   ]
 
+  extra_principal_ids = [module.azure_e2e_identity.object_id]
+
   secrets = [
     {
       name  = "E2E-Storage-ConnectionString"
@@ -190,7 +192,7 @@ module "azure_data_explorer" {
   unique_project_name = var.unique_project_name
 
   admin_principal_ids = [
-    data.azurerm_client_config.current.client_id,
+    module.azure_e2e_identity.client_id,
     module.azuread_applications.identity_1.principal_id,
     module.azuread_applications.identity_2.principal_id
   ]
@@ -427,7 +429,7 @@ module "github_secrets" {
     },
     {
       name  = "TF_AZURE_SP_APP_ID"
-      value = data.azurerm_client_config.current.client_id
+      value = module.azure_e2e_identity.client_id
     },
     {
       name  = "TF_AZURE_SP_TENANT"
@@ -561,5 +563,38 @@ module "github_secrets" {
       name  = "TF_AZURE_MANAGED_REDIS_HOST"
       value = module.azure_managed_redis.hostname
     },
+    {
+      name  = "AZURE_SP_KEY"
+      value = module.azure_e2e_identity.client_secret
+    },
   ]
+}
+
+// ====== E2E AND GARBAGE COLLECTOR IDENTITIES ======
+
+module "azure_e2e_identity" {
+  source              = "./modules/azure/e2e-identity"
+  resource_group_name = var.azure_resource_group_name
+  unique_project_name = var.unique_project_name
+}
+
+module "azure_cleanup_identity" {
+  source              = "./modules/azure/cleanup-identity"
+  resource_group_name = var.azure_resource_group_name
+  unique_project_name = var.unique_project_name
+  github_repository   = var.infrastructure_repository
+  github_environment  = var.cleanup_environment
+}
+
+module "gcp_cleanup_identity" {
+  source                 = "./modules/gcp/cleanup-identity"
+  workload_identity_pool = var.gcp_github_workload_identity_pool
+  github_environment     = var.cleanup_environment
+}
+
+module "aws_cleanup_identity" {
+  source             = "./modules/aws/cleanup-identity"
+  tags               = local.tags
+  github_repository  = var.infrastructure_repository
+  github_environment = var.cleanup_environment
 }
